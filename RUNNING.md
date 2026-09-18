@@ -23,12 +23,15 @@ origin:
 
 ```
   laptop : http://localhost:8100          (no warning)
-  phone  : https://10.178.37.222:8443     (accept the certificate warning once)
+  phone  : https://<your-lan-ip>:8443     (accept the certificate warning once)
 ```
 
 **On the laptop, use the http:// URL.** `http://localhost` already counts as a secure
 context, so `getUserMedia` works with no certificate and no interstitial. The attached
 Z-Star 1080p webcam is visible to Chrome.
+
+`serve.sh` prints your actual IP on startup; it changes when you switch networks, and the
+script reissues the certificate to match.
 
 **The phone needs https://.** `getUserMedia` silently refuses plain `http://` over a LAN —
 no prompt, no error, just no camera. Hence the self-signed cert on 8443. The phone must be

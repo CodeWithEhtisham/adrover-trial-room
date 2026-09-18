@@ -13,33 +13,49 @@
   body { margin:0; background:var(--bg); color:var(--fg);
          font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; overflow:hidden }
 
-  .app { display:grid; grid-template-columns:232px 1fr; gap:14px;
+  .app { display:grid; grid-template-columns:var(--rail,330px) 1fr; gap:14px;
          height:100dvh; padding:14px }
+  @media (max-width:1180px) { .app { --rail:250px; --thumb:140px } }
+  @media (min-width:1600px) { .app { --rail:400px; --thumb:240px } }
 
   /* ---------- left rail: scrollable garments ---------- */
+  /* min-width:0 matters: without it the grid item's auto minimum lets the horizontal
+     garment strip expand past its 1fr track and scroll the whole page sideways. */
   .rail { background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
-          display:flex; flex-direction:column; min-height:0 }
+          display:flex; flex-direction:column; min-height:0; min-width:0 }
   .rail h2, .stage h2 { font-size:11px; text-transform:uppercase; letter-spacing:.09em;
           color:var(--dim); margin:0; padding:14px 14px 10px; flex:none }
-  .rail-scroll { overflow-y:auto; overscroll-behavior:contain; padding:0 10px 12px;
-                 display:grid; gap:8px; scrollbar-width:thin;
+  .rail-scroll { overflow-y:auto; overscroll-behavior:contain; padding:0 12px 14px;
+                 display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
+                 /* max-content, not auto: this is a definite-height scroll container, so
+                    auto rows get divided into its height and every card collapses. */
+                 grid-auto-rows:max-content; align-content:start; scrollbar-width:thin;
                  scrollbar-color:var(--line) transparent }
   .rail-scroll::-webkit-scrollbar { width:8px }
   .rail-scroll::-webkit-scrollbar-thumb { background:var(--line); border-radius:4px }
 
-  .g { display:flex; gap:10px; align-items:center; text-align:left; width:100%;
-       min-height:56px; padding:6px; background:var(--card); color:var(--fg);
-       border:2px solid transparent; border-radius:10px; cursor:pointer;
-       font:inherit; transition:border-color .15s, background .15s }
-  .g:hover { background:#23232b }
+  .g { display:flex; flex-direction:column; text-align:left; width:100%; padding:0;
+       background:var(--card); color:var(--fg); border:2px solid transparent;
+       border-radius:10px; cursor:pointer; font:inherit; overflow:hidden;
+       transition:border-color .15s, transform .15s }
+  .g:hover { transform:translateY(-2px) }
   .g:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
-  .g[aria-pressed=true] { border-color:var(--accent); background:#261c16 }
-  .g img { width:44px; height:58px; object-fit:cover; border-radius:6px;
-           background:#fff; flex:none }
-  .g span { font-size:12px; line-height:1.3; color:var(--dim) }
+  .g[aria-pressed=true] { border-color:var(--accent) }
+  /* contain, not cover: a cropped product shot is the thing that makes these
+     unreadable — the hem, sleeves and drape are what identify a garment. */
+  /* Explicit height, not aspect-ratio: a percentage-width replaced element contributes
+     no height while the grid is sizing its rows, so the row collapsed to the label and
+     overflow:hidden ate the picture. Height tracks the rail width via the queries below. */
+  .g img { width:100%; height:var(--thumb,190px); object-fit:contain; background:#fff;
+           display:block }
+  /* The category sits outside the clamped span — inside it, line-clamp counted it as
+     one of the two lines and sliced it in half. */
+  .g span { font-size:11.5px; line-height:1.3; color:var(--dim); padding:7px 8px 0;
+            display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+            overflow:hidden; min-height:2.6em }
   .g[aria-pressed=true] span { color:var(--fg) }
-  .g em { display:block; font-style:normal; font-size:10px; color:var(--dim);
-          text-transform:uppercase; letter-spacing:.05em; margin-top:2px }
+  .g em { font-style:normal; font-size:9.5px; color:var(--dim); padding:3px 8px 8px;
+          text-transform:uppercase; letter-spacing:.06em }
 
   /* ---------- center stage ---------- */
   .stage { background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
@@ -97,6 +113,13 @@
          border-radius:10px; font-size:13px; max-width:52ch; text-align:left }
   input[type=file] { display:none }
   .link { color:var(--accent); cursor:pointer; text-decoration:underline; font-size:13px }
+  select { background:var(--card); color:var(--fg); border:1px solid var(--line);
+           border-radius:9px; min-height:44px; padding:0 10px; font:inherit }
+  select:disabled { color:var(--dim) }
+  .fixes { display:flex; gap:12px; align-items:center }
+  .fixes label { display:flex; align-items:center; gap:6px; font-size:13px;
+                 color:var(--dim); cursor:pointer; min-height:44px }
+  .fixes input { width:18px; height:18px; accent-color:var(--accent) }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::after { animation:none !important; transition:none !important }
@@ -105,8 +128,9 @@
     body { overflow:auto }
     .app { grid-template-columns:1fr; grid-template-rows:auto 1fr; height:auto;
            min-height:100dvh }
-    .rail { max-height:34vh }
-    .rail-scroll { grid-auto-flow:column; grid-auto-columns:150px; overflow-x:auto }
+    .rail { max-height:42vh }
+    .rail-scroll { grid-template-columns:none; grid-auto-flow:column;
+                   grid-auto-columns:132px; overflow-x:auto; --thumb:170px }
     .frame video, .frame img { max-height:48vh }
   }
 </style>
@@ -136,6 +160,11 @@ const gateReady = loadGate().catch(e => { console.warn('quality gate unavailable
 
 let garment = null, garmentThumb = null, personId = null, personImg = null;
 let stream = null, gateTimer = null, history = [];
+let provider = null, providerList = [];
+
+const providersReady = fetch('/providers').then(r => r.json()).then(j => {
+  providerList = j.available; provider = j.default;
+}).catch(() => {});
 
 // ---------- catalog ----------
 (async function catalog() {
@@ -148,7 +177,7 @@ let stream = null, gateTimer = null, history = [];
   $('#grid').innerHTML = items.map(i => `
     <button class="g" role="option" aria-selected="false" aria-pressed="false"
             data-id="${i.id}" data-cat="${i.category}">
-      <img src="${i.image}" alt=""><span>${i.name}<em>${i.category}</em></span>
+      <img src="${i.image}" alt=""><span>${i.name}</span><em>${i.category}</em>
     </button>`).join('');
 
   $('#grid').onclick = e => {
@@ -236,6 +265,7 @@ function shoot() {
 }
 
 async function upload(blob, name) {
+  await providersReady;
   const fd = new FormData(); fd.append('file', blob, name);
   const r = await fetch('/person', { method: 'POST', body: fd });
   if (!r.ok) { $('#camhint').innerHTML = '<span class="err">Upload failed — try again.</span>'; return; }
@@ -251,9 +281,23 @@ function showShot() {
     <div class="frame"><img src="${personImg}" alt="Your photo"></div>
     <div class="controls">
       <button class="go alt" id="retake">Retake</button>
+      <span id="fixes" class="fixes"></span>
+      <select id="provider" aria-label="Model provider">${providerList.map(p =>
+        `<option value="${p.id}" ${p.id === provider ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>
+           ${p.id}${p.ready ? ` · ~$${p.est_cost_usd.toFixed(3)}` : ' · no API key'}
+         </option>`).join('')}</select>
       <button class="go" id="generate">Try it on</button>
     </div>`;
   $('#retake').onclick = openCamera;
+  const LABEL = { lighting: 'Fix lighting', pose: 'Nudge pose' };
+  const syncFixes = () => {
+    // Only shown for providers that can actually honour them (§4: whole-frame editors).
+    const avail = providerList.find(x => x.id === provider)?.fixes || [];
+    $('#fixes').innerHTML = avail.map(f =>
+      `<label><input type="checkbox" value="${f}"> ${LABEL[f] || f}</label>`).join('');
+  };
+  $('#provider').onchange = e => { provider = e.target.value; syncFixes(); };
+  syncFixes();
   $('#generate').onclick = generate;
 }
 
@@ -305,7 +349,9 @@ async function generate() {
 
   try {
     const r = await fetch('/tryon', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ person_id: personId, garment_id: garment.id }) });
+      body: JSON.stringify({ person_id: personId, garment_id: garment.id, provider,
+                             fixes: [...document.querySelectorAll('#fixes input:checked')]
+                                      .map(c => c.value) }) });
     if (!r.ok) return done((await r.json()).detail);
     const { job_id } = await r.json();
 

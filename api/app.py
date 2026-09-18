@@ -5,10 +5,9 @@ Run:
     pip install -r requirements.txt
     uvicorn app:app --reload
 """
-import asyncio, base64, hashlib, io, mimetypes, os, pathlib, shutil, sqlite3, time, uuid
+import asyncio, base64, hashlib, io, os, pathlib, shutil, sqlite3, time, uuid
 from contextlib import asynccontextmanager
 
-import fal_client
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -36,7 +35,6 @@ for _d in (PERSONS, RESULTS, *(CATALOG / c for c in CATEGORIES)):
     _d.mkdir(parents=True, exist_ok=True)
 
 JOBS: dict[str, dict] = {}
-_img_refs: dict[str, str] = {}   # local path -> data uri, encoded once
 
 
 # --- storage ---------------------------------------------------------------
@@ -74,26 +72,7 @@ async def sweep_forever():
         await asyncio.sleep(3600)
 
 
-async def fal_url(path: pathlib.Path) -> str:
-    """Inline the image as a data URI instead of uploading it to fal storage.
 
-    Two reasons, either of which is fatal on its own:
-      * fal_client 1.0.2 (the latest) posts /storage/upload/initiate?storage_type=gcs,
-        which the API now rejects with "Invalid storage type". There is no fixed release.
-      * fal's upload CDN (v3b.fal.media) is ~10x slower than the API host from here —
-        a 200KB PUT write-timed-out at 70s, while rest.alpha.fal.ai answers in 1.6s.
-
-    The model endpoints accept data URIs for image inputs, so the bytes ride the request
-    to the fast host and no storage round-trip happens at all. Revisit if payload size
-    ever becomes a problem; uploading is the better shape once the SDK is fixed.
-    """
-    k = str(path)
-    if k not in _img_refs:
-        def encode():
-            ct = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-            return f"data:{ct};base64," + base64.b64encode(path.read_bytes()).decode()
-        _img_refs[k] = await asyncio.to_thread(encode)
-    return _img_refs[k]
 
 
 # --- catalog ---------------------------------------------------------------
@@ -154,7 +133,6 @@ async def upload_person(file: UploadFile):
     path = PERSONS / f"{person_id}.jpg"
     img.save(path, "JPEG", quality=92)
     path.touch()  # refresh TTL on re-upload of the same photo
-    asyncio.create_task(fal_url(path))  # encode now so it overlaps catalog browsing
     return {"person_id": person_id, "image": f"/data/persons/{person_id}.jpg"}
 
 
@@ -163,11 +141,26 @@ def get_catalog():
     return catalog()
 
 
+@app.get("/providers")
+def get_providers():
+    """§3: A/B-ing two providers on the same garment is a config change, not a refactor."""
+    return {"default": providers.default_provider(),
+            "available": [
+                {"id": k, "est_cost_usd": v["cost_usd"], "ready": True,
+                 # Only a whole-frame editor can honour these; VTON inpaints the
+                 # garment region only, so it cannot relight or repose anything.
+                 "fixes": list(providers.GPT_FIXES) if k == "gptimage" else []}
+                for k, v in providers.PROVIDERS.items()
+            ]}
+
+
 @app.post("/tryon")
 async def tryon(body: dict):
     person_id = body.get("person_id", "")
     garment_id = body.get("garment_id", "")
     provider = body.get("provider") or providers.default_provider()
+    # Whitelist: the value reaches a prompt, so unknown entries are dropped, not passed.
+    fixes = sorted(f for f in (body.get("fixes") or []) if f in providers.GPT_FIXES)
     if provider not in providers.PROVIDERS:
         raise HTTPException(400, f"unknown provider {provider}")
     person = PERSONS / f"{person_id}.jpg"
@@ -176,7 +169,7 @@ async def tryon(body: dict):
     garment = garment_path(garment_id)
 
     # §3 caching: the client tries the same jacket three times during a demo.
-    cache_key = f"{person_id}_{garment_id}_{provider}_{body.get('seed')}"
+    cache_key = f"{person_id}_{garment_id}_{provider}_{body.get('seed')}_{'+'.join(fixes) or 'none'}"
     with db() as con:
         hit = con.execute(
             "SELECT * FROM generations WHERE cache_key=? AND status='ok' LIMIT 1", (cache_key,)
@@ -189,17 +182,17 @@ async def tryon(body: dict):
 
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "queued", "provider": provider}
-    asyncio.create_task(_run(job_id, cache_key, person, garment, garment_id, provider, body.get("seed")))
+    asyncio.create_task(_run(job_id, cache_key, person, garment, garment_id, provider,
+                             body.get("seed"), fixes))
     return {"job_id": job_id}
 
 
-async def _run(job_id, cache_key, person, garment, garment_id, provider, seed):
+async def _run(job_id, cache_key, person, garment, garment_id, provider, seed, fixes=()):
     category = garment_id.split("/")[0]
     t0 = time.time()
     try:
         JOBS[job_id]["status"] = "generating"
-        person_url, garment_url = await asyncio.gather(fal_url(person), fal_url(garment))
-        res = await providers.generate(provider, person_url, garment_url, category, seed)
+        res = await providers.generate(provider, person, garment, category, seed, fixes)
         name = f"{job_id}.jpg"
         await asyncio.to_thread(_download, res["url"], RESULTS / name)
         JOBS[job_id] |= {"status": "done", "image": f"/data/results/{name}",
