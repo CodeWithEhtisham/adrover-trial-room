@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# Secrets — never commit. .env holds a live FAL_KEY that bills a real account.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+api/certs/
+
+# ---------------------------------------------------------------------------
+# Customer photos and renders.
+# These are faces: biometric-adjacent (§8-7), retained for 24h, never published.
+# The renders contain the same face as the input, so they are equally sensitive.
+# ---------------------------------------------------------------------------
+api/data/
+spike/persons/*
+spike/out/
+!spike/persons/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Scraped garment imagery.
+# These are the brands' copyrighted product photographs (Nishat, Sana Safinaz,
+# Gul Ahmed, Amir Adnan, J., Limelight, Bonanza Satrangi, Generation, Outfitters,
+# Breakout), pulled for internal evaluation. Redistributing them in a public repo
+# is a different thing from testing with them — so they stay out.
+# Re-fetch with: python spike/fetch_garments.py
+# ---------------------------------------------------------------------------
+spike/garments/*/*
+spike/garments/manifest.json
+api/catalog/*/*
+!**/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Databases and logs
+# ---------------------------------------------------------------------------
+*.db
+*.sqlite3
+*.log
+
+# ---------------------------------------------------------------------------
+# OS and editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

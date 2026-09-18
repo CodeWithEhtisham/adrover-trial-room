@@ -1,0 +1,366 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdRover — Fitting Room</title>
+<style>
+  :root {
+    --bg:#0e0e11; --panel:#15151a; --card:#1c1c23; --line:#2b2b34;
+    --fg:#ececf1; --dim:#9a9aa6; --accent:#e8622c; --ok:#33c06a; --bad:#e0563f;
+    --r:12px;
+  }
+  * { box-sizing:border-box }
+  html, body { height:100% }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; overflow:hidden }
+
+  .app { display:grid; grid-template-columns:232px 1fr; gap:14px;
+         height:100dvh; padding:14px }
+
+  /* ---------- left rail: scrollable garments ---------- */
+  .rail { background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+          display:flex; flex-direction:column; min-height:0 }
+  .rail h2, .stage h2 { font-size:11px; text-transform:uppercase; letter-spacing:.09em;
+          color:var(--dim); margin:0; padding:14px 14px 10px; flex:none }
+  .rail-scroll { overflow-y:auto; overscroll-behavior:contain; padding:0 10px 12px;
+                 display:grid; gap:8px; scrollbar-width:thin;
+                 scrollbar-color:var(--line) transparent }
+  .rail-scroll::-webkit-scrollbar { width:8px }
+  .rail-scroll::-webkit-scrollbar-thumb { background:var(--line); border-radius:4px }
+
+  .g { display:flex; gap:10px; align-items:center; text-align:left; width:100%;
+       min-height:56px; padding:6px; background:var(--card); color:var(--fg);
+       border:2px solid transparent; border-radius:10px; cursor:pointer;
+       font:inherit; transition:border-color .15s, background .15s }
+  .g:hover { background:#23232b }
+  .g:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+  .g[aria-pressed=true] { border-color:var(--accent); background:#261c16 }
+  .g img { width:44px; height:58px; object-fit:cover; border-radius:6px;
+           background:#fff; flex:none }
+  .g span { font-size:12px; line-height:1.3; color:var(--dim) }
+  .g[aria-pressed=true] span { color:var(--fg) }
+  .g em { display:block; font-style:normal; font-size:10px; color:var(--dim);
+          text-transform:uppercase; letter-spacing:.05em; margin-top:2px }
+
+  /* ---------- center stage ---------- */
+  .stage { background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+           display:flex; flex-direction:column; min-height:0; min-width:0 }
+  .stage-body { flex:1; min-height:0; display:flex; flex-direction:column;
+                align-items:center; justify-content:center; gap:12px; padding:0 16px 16px }
+  .frame { position:relative; max-width:100%; max-height:100%; border-radius:var(--r);
+           overflow:hidden; background:#000; line-height:0; flex:0 1 auto }
+  .frame video, .frame img { max-width:100%; max-height:62vh; width:auto; height:auto;
+                             display:block }
+  .frame video { transform:scaleX(-1) }
+  .guide { position:absolute; inset:5% 28%; border:2px dashed rgba(255,255,255,.5);
+           border-radius:50%/10%; pointer-events:none }
+
+  .empty { color:var(--dim); text-align:center; max-width:34ch }
+
+  .controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; flex:none }
+  button.go { min-height:44px; padding:0 22px; border:0; border-radius:10px;
+              font:600 15px system-ui; background:var(--accent); color:#fff;
+              cursor:pointer; transition:filter .15s }
+  button.go:hover:not(:disabled) { filter:brightness(1.1) }
+  button.go:disabled { background:var(--line); color:var(--dim); cursor:default }
+  button.alt { background:var(--card); color:var(--fg); border:1px solid var(--line) }
+  button.go:focus-visible { outline:2px solid #fff; outline-offset:2px }
+
+  #lights { display:flex; gap:14px; flex-wrap:wrap; justify-content:center;
+            font-size:12.5px; color:var(--dim); flex:none }
+  #lights div { display:flex; align-items:center; gap:6px }
+  #lights i { width:9px; height:9px; border-radius:50%; background:#4a4a55; flex:none }
+  #lights .ok i { background:var(--ok) } #lights .bad i { background:var(--bad) }
+  #lights .ok { color:var(--fg) } #lights .bad { color:#ffb3b3 }
+
+  /* ---------- generating: the garment flies into the photo ---------- */
+  .flyer { position:fixed; z-index:60; border-radius:8px; object-fit:cover;
+           pointer-events:none; will-change:transform,opacity }
+  .status { font-size:13px; color:var(--dim); text-align:center; flex:none }
+  .frame.busy::after { content:''; position:absolute; inset:0;
+                       background:linear-gradient(105deg,transparent 35%,
+                                  rgba(232,98,44,.22) 50%,transparent 65%);
+                       background-size:260% 100%; animation:sweep 1.9s linear infinite }
+  @keyframes sweep { from { background-position:160% 0 } to { background-position:-60% 0 } }
+
+  /* ---------- result ---------- */
+  .cmp { position:relative }
+  .cmp .after { position:absolute; inset:0; width:100%; height:100%;
+                object-fit:contain; clip-path:inset(0 0 0 var(--split,50%)) }
+  .cmp input[type=range] { position:absolute; left:6%; bottom:12px; width:88%; margin:0;
+                           accent-color:var(--accent); height:44px }
+  #thumbs { display:flex; gap:8px; overflow-x:auto; max-width:100%; flex:none; padding:2px }
+  #thumbs img { width:54px; height:72px; object-fit:cover; border-radius:7px;
+                cursor:pointer; border:2px solid transparent }
+  #thumbs img.on { border-color:var(--accent) }
+
+  .err { border:1px solid #6b2020; background:#2a1414; color:#ffb0b0; padding:12px;
+         border-radius:10px; font-size:13px; max-width:52ch; text-align:left }
+  input[type=file] { display:none }
+  .link { color:var(--accent); cursor:pointer; text-decoration:underline; font-size:13px }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::after { animation:none !important; transition:none !important }
+  }
+  @media (max-width:760px) {
+    body { overflow:auto }
+    .app { grid-template-columns:1fr; grid-template-rows:auto 1fr; height:auto;
+           min-height:100dvh }
+    .rail { max-height:34vh }
+    .rail-scroll { grid-auto-flow:column; grid-auto-columns:150px; overflow-x:auto }
+    .frame video, .frame img { max-height:48vh }
+  }
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <h2>Garments</h2>
+    <div class="rail-scroll" id="grid" role="listbox" aria-label="Garment catalog"></div>
+  </aside>
+
+  <main class="stage">
+    <h2 id="stage-title">Fitting room</h2>
+    <div class="stage-body" id="body" aria-busy="false">
+      <p class="empty" id="empty">Pick a garment on the left to start.</p>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { loadGate, check } from './gate.js';
+const $ = s => document.querySelector(s);
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)');
+
+// ~11s of wasm + model on first load. Start it now so it overlaps garment browsing
+// (Appendix B-2's trick) instead of stalling the shutter later.
+const gateReady = loadGate().catch(e => { console.warn('quality gate unavailable', e); return null; });
+
+let garment = null, garmentThumb = null, personId = null, personImg = null;
+let stream = null, gateTimer = null, history = [];
+
+// ---------- catalog ----------
+(async function catalog() {
+  const items = await (await fetch('/catalog')).json();
+  if (!items.length) {
+    $('#grid').innerHTML = '<p class="empty">No garments. Drop images into ' +
+      '<code>api/catalog/&lt;category&gt;/</code> and reload.</p>';
+    return;
+  }
+  $('#grid').innerHTML = items.map(i => `
+    <button class="g" role="option" aria-selected="false" aria-pressed="false"
+            data-id="${i.id}" data-cat="${i.category}">
+      <img src="${i.image}" alt=""><span>${i.name}<em>${i.category}</em></span>
+    </button>`).join('');
+
+  $('#grid').onclick = e => {
+    const b = e.target.closest('.g'); if (!b) return;
+    $('#grid').querySelectorAll('.g').forEach(x => {
+      x.setAttribute('aria-pressed', x === b); x.setAttribute('aria-selected', x === b);
+    });
+    garment = { id: b.dataset.id, category: b.dataset.cat };
+    garmentThumb = b.querySelector('img');
+    openCamera();
+  };
+})();
+
+// ---------- capture ----------
+async function openCamera() {
+  const full = garment.category !== 'tops';
+  $('#stage-title').textContent = 'Your photo';
+  $('#body').innerHTML = `
+    <div class="frame"><video id="video" playsinline muted></video><div class="guide"></div></div>
+    <div id="lights">
+      <div id="l-framing"><i></i><span>Framing</span></div>
+      <div id="l-pose"><i></i><span>Pose</span></div>
+      <div id="l-lighting"><i></i><span>Lighting</span></div>
+    </div>
+    <p class="status" id="camhint">${full
+      ? `This is a <b>${garment.category}</b> — stand back until your feet are visible.`
+      : 'Face the camera, arms slightly away from your sides.'}</p>
+    <div class="controls">
+      <button class="go" id="shutter" disabled>Take photo</button>
+    </div>
+    <label><input type="file" id="file" accept="image/*"><span class="link">or choose a photo</span></label>`;
+
+  $('#file').onchange = e => e.target.files[0] && upload(e.target.files[0], e.target.files[0].name);
+  $('#shutter').onclick = shoot;
+
+  try {
+    stopCam();
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    $('#video').srcObject = stream;
+    await $('#video').play();
+    startGate(full);
+  } catch (e) {
+    $('#body').querySelector('.frame').remove();
+    $('#lights').remove(); $('#shutter').remove();
+    $('#camhint').innerHTML = `<span class="err" style="display:block">No camera — ${e.name}.
+      Use the file picker below.</span>`;
+  }
+}
+
+async function startGate(needFullBody) {
+  $('#shutter').textContent = 'Checking framing…';
+  if (!await gateReady) {
+    $('#shutter').disabled = false; $('#shutter').textContent = 'Take photo';
+    $('#lights').innerHTML = '<div>Quality gate unavailable — check framing yourself.</div>';
+    return;
+  }
+  clearInterval(gateTimer);
+  gateTimer = setInterval(() => {
+    const v = $('#video');
+    if (!v || v.hidden || !v.videoWidth) return;
+    const r = check(v, needFullBody, performance.now());
+    if (!r) return;
+    for (const k of ['framing', 'pose', 'lighting']) {
+      const el = $('#l-' + k); if (!el) return;
+      el.className = r[k].ok ? 'ok' : 'bad';
+      el.querySelector('span').textContent = r[k].msg || k;
+    }
+    $('#shutter').disabled = !r.ok;
+    $('#shutter').textContent = r.ok ? 'Take photo' : 'Fix the red items';
+  }, 300);   // 3Hz reads as live and leaves the CPU alone
+}
+function stopGate() { clearInterval(gateTimer); gateTimer = null; }
+function stopCam() {
+  stopGate();
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+}
+addEventListener('pagehide', stopCam);
+
+function shoot() {
+  const v = $('#video'), c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);   // un-mirrored: preview flips, the file must not
+  c.toBlob(b => upload(b, 'capture.jpg'), 'image/jpeg', 0.95);
+}
+
+async function upload(blob, name) {
+  const fd = new FormData(); fd.append('file', blob, name);
+  const r = await fetch('/person', { method: 'POST', body: fd });
+  if (!r.ok) { $('#camhint').innerHTML = '<span class="err">Upload failed — try again.</span>'; return; }
+  const j = await r.json();
+  personId = j.person_id; personImg = j.image;
+  stopCam();
+  showShot();
+}
+
+function showShot() {
+  $('#stage-title').textContent = 'Ready';
+  $('#body').innerHTML = `
+    <div class="frame"><img src="${personImg}" alt="Your photo"></div>
+    <div class="controls">
+      <button class="go alt" id="retake">Retake</button>
+      <button class="go" id="generate">Try it on</button>
+    </div>`;
+  $('#retake').onclick = openCamera;
+  $('#generate').onclick = generate;
+}
+
+// ---------- generating: fly the garment into the photo ----------
+function flyGarment(frame) {
+  // Reduced motion gets the static sweep only — no travelling element.
+  if (REDUCED.matches || !garmentThumb) return null;
+  const a = garmentThumb.getBoundingClientRect();
+  const b = frame.getBoundingClientRect();
+  const clone = document.createElement('img');
+  clone.src = garmentThumb.src; clone.className = 'flyer'; clone.alt = '';
+  Object.assign(clone.style, { left: `${a.left}px`, top: `${a.top}px`,
+                               width: `${a.width}px`, height: `${a.height}px` });
+  document.body.appendChild(clone);
+
+  const dx = (b.left + b.width / 2) - (a.left + a.width / 2);
+  const dy = (b.top + b.height / 2) - (a.top + a.height / 2);
+  // Cap the growth: uncapped this reaches ~13x on a tall stage and the garment balloons
+  // over the whole screen instead of settling onto the body.
+  const grow = Math.min(4.5, Math.max(1.4, (b.height * 0.5) / a.height));
+
+  // Only transform and opacity, so it never triggers layout.
+  const anim = clone.animate([
+    { transform: 'translate(0,0) scale(1)', opacity: 0 },
+    { transform: `translate(${dx * .25}px,${dy * .25}px) scale(${1 + (grow - 1) * .2})`,
+      opacity: .9, offset: .25 },
+    { transform: `translate(${dx * .75}px,${dy * .75}px) scale(${1 + (grow - 1) * .75})`,
+      opacity: .5, offset: .75 },
+    { transform: `translate(${dx}px,${dy}px) scale(${grow})`, opacity: 0 },
+  ], { duration: 2200, easing: 'cubic-bezier(.22,.61,.36,1)', iterations: Infinity });
+  return { clone, anim };
+}
+
+async function generate() {
+  $('#stage-title').textContent = 'Fitting';
+  $('#body').setAttribute('aria-busy', 'true');
+  $('#body').innerHTML = `
+    <div class="frame busy" id="frame"><img src="${personImg}" alt="Your photo"></div>
+    <p class="status" id="status">Matching fabric to your pose — usually 10–15 seconds.</p>`;
+  const flight = flyGarment($('#frame'));
+
+  // Correctness never waits on the animation: the job result drives state, and the
+  // flight is cancelled whenever it lands.
+  const done = msg => {
+    flight?.anim.cancel(); flight?.clone.remove();
+    $('#body').setAttribute('aria-busy', 'false');
+    if (msg) fail(msg);
+  };
+
+  try {
+    const r = await fetch('/tryon', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ person_id: personId, garment_id: garment.id }) });
+    if (!r.ok) return done((await r.json()).detail);
+    const { job_id } = await r.json();
+
+    while (true) {                       // a 10s job does not need a socket
+      await new Promise(s => setTimeout(s, 800));
+      const j = await (await fetch('/jobs/' + job_id)).json();
+      if (j.status === 'done') { done(null); return show(j); }
+      if (j.status === 'failed') return done(j.error);
+    }
+  } catch (e) { done(`${e.name}: ${e.message}`); }
+}
+
+// ---------- result ----------
+function show(j) {
+  history.unshift({ src: j.image, person: personImg });
+  $('#stage-title').textContent =
+    `Result — ${j.cached ? 'cached' : (j.latency_ms / 1000).toFixed(1) + 's'} · ${j.provider}`;
+  $('#body').innerHTML = `
+    <div class="frame cmp" id="cmp">
+      <img src="${personImg}" alt="Before">
+      <img class="after" src="${j.image}" alt="After">
+      <input type="range" min="0" max="100" value="50" aria-label="Compare before and after">
+    </div>
+    <p class="status">Drag to compare ·
+      <a class="link" href="${j.image}" download>Download</a></p>
+    <div id="thumbs"></div>
+    <div class="controls"><button class="go alt" id="again">Retake photo</button></div>`;
+  const cmp = $('#cmp');
+  cmp.querySelector('input').oninput = e => cmp.style.setProperty('--split', e.target.value + '%');
+  $('#again').onclick = openCamera;
+
+  $('#thumbs').innerHTML = history.map((h, i) =>
+    `<img src="${h.src}" class="${i ? '' : 'on'}" data-i="${i}" alt="Look ${i + 1}">`).join('');
+  $('#thumbs').onclick = e => {
+    const i = e.target.dataset.i; if (i === undefined) return;
+    const h = history[i];
+    cmp.querySelector('img').src = h.person;
+    cmp.querySelector('.after').src = h.src;
+    $('#thumbs').querySelectorAll('img').forEach(x => x.classList.toggle('on', x === e.target));
+  };
+}
+
+function fail(msg) {
+  const HINTS = [
+    [/body pose|detect.*pose|no person/i,
+     'No body detected. Step back so your head, shoulders and waist are all in frame.'],
+    [/face|multiple people/i, 'Face the camera straight on, one person only.'],
+    [/resolution|too small/i, 'Photo is too small. Move into better light and retake.'],
+  ];
+  const hint = (HINTS.find(([re]) => re.test(msg || '')) || [])[1];
+  $('#stage-title').textContent = 'Failed';
+  $('#body').innerHTML =
+    `<div class="err">${hint ? `<b>${hint}</b><br><br>` : ''}
+       <span style="opacity:.65;font-size:12px">${msg || 'unknown error'}</span></div>
+     <div class="controls"><button class="go" id="again">Retake photo</button></div>`;
+  $('#again').onclick = openCamera;
+}
+</script>
